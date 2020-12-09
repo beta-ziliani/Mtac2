@@ -1,3 +1,6 @@
+(** * Mtac2's primitives *)
+
+(* begin details: Imports. *)
 Require Import Strings.String.
 Require Import NArith.BinNat.
 From Mtac2 Require Import Logic Datatypes Logic List Utils MTele Pattern Specif.
@@ -5,38 +8,52 @@ Import ListNotations.
 Import ProdNotations.
 From Mtac2.intf Require Export Sorts Exceptions Dyn Reduction Unification DeclarationDefs Goals Case Tm_kind Name.
 Import Sorts.S.
+(* end details *)
 
+(* begin details: Options related to universes. *)
 Set Universe Polymorphism.
 Set Polymorphic Inductive Cumulativity.
 Unset Universe Minimization ToSet.
-
-(** THE definition of the monad *)
-Unset Printing Notations.
+(* end details *)
 
 Module M.
 
+(** The [M] type is just notation for [M.t]. In order to keep the set
+    of universes low, and to avoid cyclic dependencies, we make it a
+    [Prop] with a dummy constructor [mkt]. Then, every primitive will
+    just be an _opaque_ definition of [mkt]. *)
 CoInductive t (a : Type) : Prop := mkt : t a.
 Arguments mkt {_}.
 
+(* begin hide *)
 Local Ltac make := refine (mkt) || (intro; make).
+(* end hide *)
 
+(** [ret x] returns term [x]. *)
 Definition ret : forall {A : Type}, A -> t A.
   make. Qed.
 
+(** Monadic bind. *)
 Definition bind : forall {A : Type} {B : Type}, t A -> (A -> t B) -> t B.
   make. Qed.
 
+(** Exception handling: we use an apostrophe because we will use a
+    different interface (see below). *)
 Definition mtry' : forall {A : Type}, t A -> (Exception -> t A) -> t A.
   make. Qed.
 
 Definition raise' : forall {A : Type}, Exception -> t A.
   make. Qed.
 
+(** Mtac2 supports unbounded fixpoints with up to 5 arguments. In the
+    file [meta/MFix] there is support for n-ary fixpoints, although with
+    some heavy machinery. *)
 Definition fix1 : forall{A: Type} (B: A->Type),
   ((forall x: A, t (B x))->(forall x: A, t (B x))) ->
   forall x: A, t (B x).
   make. Qed.
 
+(* begin details: The other 4 fixpoints *)
 Definition fix2 : forall {A1: Type} {A2: A1->Type} (B: forall (a1 : A1), A2 a1->Type),
   ((forall (x1: A1) (x2: A2 x1), t (B x1 x2)) ->
     (forall (x1: A1) (x2: A2 x1), t (B x1 x2))) ->
@@ -60,26 +77,27 @@ Definition fix5: forall{A1: Type} {A2: A1->Type} {A3: forall(a1: A1), A2 a1->Typ
     (forall (x1 : A1) (x2 : A2 x1) (x3 : A3 x1 x2) (x4 : A4 x1 x2 x3) (x5 : A5 x1 x2 x3 x4), t (B x1 x2 x3 x4 x5))) ->
   forall (x1 : A1) (x2 : A2 x1) (x3 : A3 x1 x2) (x4 : A4 x1 x2 x3) (x5 : A5 x1 x2 x3 x4), t (B x1 x2 x3 x4 x5).
   make. Qed.
+(* end details *)
 
-
-(** [is_var e] returns if [e] is a variable. *)
+(** [is_var e] returns if [e] is a variable (or an evar defined as one). *)
 Definition is_var: forall{A : Type}, A->t bool.
   make. Qed.
 
-(* [nu x od f] executes [f x] where variable [x] is added to the local context,
-   optionally with definition [d] with [od = Some d].  It raises
-   [NameExistsInContext] if the name "x" is in the context, or
-   [VarAppearsInValue] if executing [f x] results in a term containing variable
-   [x]. *)
+(** [nu x od f] executes [f x] where variable [x] is added to the
+    local context, optionally with definition [d] with [od = Some d].
+    It raises [NameExistsInContext] if the name "x" is in the context,
+    or [VarAppearsInValue] if executing [f x] results in a term
+    containing variable [x]. *)
 Definition nu: forall{A: Type}{B: Type}, name -> moption A -> (A -> t B) -> t B.
   make. Qed.
 
-(* [@nu_let A B C n t f] expects [t] to be [let y : A' := t1 in t2] and executes
-   [f x t2{x/y}], with variable [x := t1] added to the local context.  It
-   raises [NotALetIn] if [t] is not a let-in, [NotTheSameType] if [A] is not
-   unifiable with [A'], [NameExistsInContext] if the name "x" is in the context,
-   or [VarAppearsInValue] if executing [f] with the given arguments results in a
-   term containing variable [x]. *)
+(** [@nu_let A B C n t f] expects [t] to be [let y : A' := t1 in t2]
+    and executes [f x t2{x/y}], with variable [x := t1] added to the
+    local context.  It raises [NotALetIn] if [t] is not a let-in,
+    [NotTheSameType] if [A] is not unifiable with [A'],
+    [NameExistsInContext] if the name "x" is in the context, or
+    [VarAppearsInValue] if executing [f] with the given arguments
+    results in a term containing variable [x]. *)
 Definition nu_let: forall{A: Type}{B: Type}{C: Type}, name -> C -> (A -> C -> t B) -> t B.
   make. Qed.
 
@@ -128,25 +146,26 @@ Definition get_binder_name: forall{A: Type}, A -> t@{Set} string.
 Definition remove : forall{A: Type} {B: Type}, A -> t B -> t B.
   make. Qed.
 
-(** [gen_evar A ohyps] creates a meta-variable with type [A] and,
-    optionally, in the context resulting from [ohyp].
+(** [gen_evar A ohyps] creates a meta-variable with type [A],
+    optionally restricted to the context resulting from [ohyp].
 
     It might raise [HypMissesDependency] if some variable in [ohyp]
-    is referring to a variable not in the rest of the list
-    (the order matters, and is from new-to-old). For instance,
+    is referring to a variable not in the rest of the list.
+    The order matters, and is from new-to-old. For instance,
     if [H : x > 0], then the context containing [H] and [x] should be
     given as:
     [ [ahyp H None; ahyp x None] ]
 
     If the type [A] is referring to variables not in the list of
     hypotheses, it raise [TypeMissesDependency]. If the list contains
-    something that is not a variable, it raises [NotAVar]. If it contains duplicated
-    occurrences of a variable, it raises a [DuplicatedVariable].
+    something that is not a variable, it raises [NotAVar]. If it contains
+    duplicated occurrences of a variable, it raises a [DuplicatedVariable].
 *)
 Definition gen_evar@{a H}: forall(A: Type@{a}), moption@{a} (mlist@{a} Hyp@{H}) -> t A.
   make. Qed.
 
-(** [is_evar e] returns if [e] is a meta-variable. *)
+(** [is_evar e] returns if [e] is an uninstantiated meta-variable,
+    perhaps applied to a list of arguments. *)
 Definition is_evar: forall{A: Type}, A -> t bool.
   make. Qed.
 
@@ -171,6 +190,9 @@ Definition pretty_print : forall{A: Type}, A -> t@{Set} string.
 Definition hyps: t (mlist Hyp).
   make. Qed.
 
+(** [destcase e] returns a shallow reification of the pattern matching
+    [e]. It raises [NotAMachExp] if [e] is not of the form
+    [match x with ... end]. *)
 Definition destcase: forall{A: Type} (a: A), t (Case).
   make. Qed.
 
@@ -185,6 +207,7 @@ Definition destcase: forall{A: Type} (a: A), t (Case).
 Definition constrs: forall{A: Type} (a: A), t Ind_dyn.
   make. Qed.
 
+(** [makecase] is the inverse of [destcase]. *)
 Definition makecase: forall(C: Case), t dyn.
   make. Qed.
 
@@ -204,17 +227,28 @@ Definition unify_cnt {A: Type} {B: A -> Type} (U:Unification) (x y : A) : t (B y
 Definition unify_univ (A: Type) (B: Type) : Unification -> t (moption (A->B)).
   make. Qed.
 
-(** [get_reference s] returns the constant that is reference by s. *)
+(** [get_reference s] returns the constant that is reference by [s]. *)
 Definition get_reference: string -> t dyn.
   make. Qed.
 
-(** [get_var s] returns the var named after s. *)
+(** [get_var s] returns the var named after [s]. *)
 Definition get_var: string -> t dyn.
   make. Qed.
 
+(** [call_ltac s args] calls an Ltac tactic named [s] with the list of
+    arguments in [args], returning the new list of goals. We note
+    several caveats:
+    - Ltac's API is a well-known mess, so it is not easy to interface
+      with every possible tactic.
+    - The arguments are terms (wrapped in a [dyn]), but many tactics require
+      other kind of arguments, which we do not support at the moment.
+    For some working examples of interfacing with Ltac you are invited to see
+    the file [tactics/ImportedTactics.v]. *)
 Definition call_ltac : forall(sort: Sort) {A: sort}, string->mlist dyn -> t (mprod A (mlist (goal gs_any))).
   make. Qed.
 
+(** [list_ltac] simply prints out all the Ltac names available to
+    [call_ltac]. It is used for debugging mainly. *)
 Definition list_ltac: t unit.
   make. Qed.
 
