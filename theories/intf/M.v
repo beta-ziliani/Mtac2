@@ -1,5 +1,11 @@
 (** * Mtac2's primitives *)
 
+(** In this file we list all of the primitives of Mtac2 that are
+    executed in the OCaml interpreter. They form the building blocks
+    in which everything else is constructed. Following the primitives
+    you can find several utilities to interface with the
+    primitives. *)
+
 (* begin details: Imports. *)
 Require Import Strings.String.
 Require Import NArith.BinNat.
@@ -29,20 +35,14 @@ Arguments mkt {_}.
 Local Ltac make := refine (mkt) || (intro; make).
 (* end hide *)
 
-(** [ret x] returns term [x]. *)
+(** ** Monadic operators and fixed-points *)
+
+(** [ret x] is the monadic return. *)
 Definition ret : forall {A : Type}, A -> t A.
   make. Qed.
 
 (** Monadic bind. *)
 Definition bind : forall {A : Type} {B : Type}, t A -> (A -> t B) -> t B.
-  make. Qed.
-
-(** Exception handling: we use an apostrophe because we will use a
-    different interface (see below). *)
-Definition mtry' : forall {A : Type}, t A -> (Exception -> t A) -> t A.
-  make. Qed.
-
-Definition raise' : forall {A : Type}, Exception -> t A.
   make. Qed.
 
 (** Mtac2 supports unbounded fixpoints with up to 5 arguments. In the
@@ -79,9 +79,79 @@ Definition fix5: forall{A1: Type} {A2: A1->Type} {A3: forall(a1: A1), A2 a1->Typ
   make. Qed.
 (* end details *)
 
-(** [is_var e] returns if [e] is a variable (or an evar defined as one). *)
-Definition is_var: forall{A : Type}, A->t bool.
+(** ** Meta-variable creation and instantiation *)
+
+(** Mtac2 presents serveral primitives to deal with meta-variables
+    a.k.a. _evars_. *)
+
+(** [gen_evar A ohyps] creates a meta-variable with type [A],
+    optionally restricted to the context resulting from [ohyp].
+
+    It might raise [HypMissesDependency] if some variable in [ohyp]
+    is referring to a variable not in the rest of the list.
+    The order matters, and is from new-to-old. For instance,
+    if [H : x > 0], then the context containing [H] and [x] should be
+    given as:
+    [ [ahyp H None; ahyp x None] ]
+
+    If the type [A] is referring to variables not in the list of
+    hypotheses, it raise [TypeMissesDependency]. If the list contains
+    something that is not a variable, it raises [NotAVar]. If it contains
+    duplicated occurrences of a variable, it raises a [DuplicatedVariable].
+*)
+Definition gen_evar@{a H}: forall(A: Type@{a}), moption@{a} (mlist@{a} Hyp@{H}) -> t A.
   make. Qed.
+
+(** [is_evar e] returns if [e] is an uninstantiated meta-variable,
+    perhaps applied to a list of arguments. *)
+Definition is_evar: forall{A: Type}, A -> t bool.
+  make. Qed.
+
+(** [unify_cnt U x y ts tf] uses unification strategy [U] to equate
+    [x] and [y] (see the [Unification] type).  If unification
+    succeeds, it will run [ts].  Otherwise, if unification fails,
+    [tf].  It uses _convertibility of universes_, meaning that it
+    fails if [x] is [Prop] and [y] is [Type]. If they are both types, it
+    will try to equate its levels. *)
+Definition unify_cnt {A: Type} {B: A -> Type} (U:Unification) (x y : A) : t (B y) -> t (B x) -> t (B x).
+  make. Qed.
+
+(** [munify_univ A B U] uses unification strategy [U] to equate
+    universes [A] and [B].  It uses cumulativity of universes, e.g.,
+    it succeeds if [x] is [Prop] and [y] is [Type]. It returns an
+    injection from an element of type [A] to an element of type
+    [B]. *)
+Definition unify_univ (A: Type) (B: Type) : Unification -> t (moption (A->B)).
+  make. Qed.
+
+(** ** Exception handling *)
+
+(** For [mtry' code handler] the semantics are almost as expected:
+    first the [code] is executed, and if it fails with exception [e],
+    the code [handler e] is executed. There are two important points
+    to make:
+
+    1. If [e] contains free variables or free meta-variables
+       (a.k.a. _evars_), the exception [ExceptionNotGround] is
+       provided as argument of [handler], instead of [e].
+
+    2. The meta-variables created by [code] are thrown away, to avoid
+       having dangling evars around.
+
+    We append an apostrophe because we will use a different interface
+    (see [mtry] and [raise] below).*)
+Definition mtry' : forall {A : Type}, t A -> (Exception -> t A) -> t A.
+  make. Qed.
+
+Definition raise' : forall {A : Type}, Exception -> t A.
+  make. Qed.
+
+(** ** Operating with variables *)
+
+(** The variables from the local context (current hypotheses) and
+binders can be created, abstracted, removed, and queried. *)
+
+(** ** Creation *)
 
 (** [nu x od f] executes [f x] where variable [x] is added to the
     local context, optionally with definition [d] with [od = Some d].
@@ -100,6 +170,8 @@ Definition nu: forall{A: Type}{B: Type}, name -> moption A -> (A -> t B) -> t B.
     results in a term containing variable [x]. *)
 Definition nu_let: forall{A: Type}{B: Type}{C: Type}, name -> C -> (A -> C -> t B) -> t B.
   make. Qed.
+
+(** ** Abstraction *)
 
 (** [abs_fun x e] abstracts variable [x] from [e]. It raises [NotAVar] if [x]
     is not a variable, or [AbsDependencyError] if [e] or its type [P] depends on
@@ -130,6 +202,36 @@ Definition abs_prod_prop: forall{A: Type} (x : A), Prop -> t Prop.
 Definition abs_fix: forall{A: Type}, A -> A -> N -> t A.
   make. Qed.
 
+(** ** Removal *)
+
+(** [remove x t] executes [t] in a context without variable [x].
+    Raises [NotAVar] if [x] is not a variable, and
+    [CannotRemoveVar "x"] if [t] or the environment depends on [x]. *)
+Definition remove : forall{A: Type} {B: Type}, A -> t B -> t B.
+  make. Qed.
+
+(** [@replace A B _ x eq t] excecutes [t] in the context resulting from replacing
+    the type [A] of hypothesis [x] with [B], using the [eq] witness of their
+    equality. [eq] must be [meq_refl] or things might go wrong (see #<a href="https://github.com/Mtac2/Mtac2/issues/205">Issue 205</a>). *)
+Definition replace {A B C} (x:A) : A =m= B -> t C -> t C.
+  make. Qed.
+
+(** ** Querying *)
+
+(** [is_var e] returns if [e] is a variable (or an evar defined as one). *)
+Definition is_var: forall{A : Type}, A->t bool.
+  make. Qed.
+
+(** [get_var s] returns the var named after [s]. It raises
+    [RefNotFound s] if it doesn't exists. *)
+Definition get_var: string -> t dyn.
+  make. Qed.
+
+(** [hyps] returns the list of hypotheses _shallowly reified_ in a
+    list of [Hyp]. *)
+Definition hyps: t (mlist Hyp).
+  make. Qed.
+
 (** [get_binder_name t] returns the name of variable [x] if:
     - [t = x],
     - [t = forall x, P x],
@@ -140,42 +242,39 @@ Definition abs_fix: forall{A: Type}, A -> A -> N -> t A.
 Definition get_binder_name: forall{A: Type}, A -> t@{Set} string.
   make. Qed.
 
-(** [remove x t] executes [t] in a context without variable [x].
-    Raises [NotAVar] if [x] is not a variable, and
-    [CannotRemoveVar "x"] if [t] or the environment depends on [x]. *)
-Definition remove : forall{A: Type} {B: Type}, A -> t B -> t B.
+(** ** Options *)
+
+(** The following options help debug an Mtac2 program. Unfortunately,
+    at the moment setting an option in Mtac2 is a global effect, and
+    undoing it has to be done by manyally setting the option
+    again. That is, going back in the proof script won't undo the
+    setting of this options. *)
+
+(** The following option prints details about the exceptions being thrown. *)
+Definition get_debug_exceptions: t bool.
+  make. Qed.
+Definition set_debug_exceptions: bool -> t unit.
   make. Qed.
 
-(** [gen_evar A ohyps] creates a meta-variable with type [A],
-    optionally restricted to the context resulting from [ohyp].
-
-    It might raise [HypMissesDependency] if some variable in [ohyp]
-    is referring to a variable not in the rest of the list.
-    The order matters, and is from new-to-old. For instance,
-    if [H : x > 0], then the context containing [H] and [x] should be
-    given as:
-    [ [ahyp H None; ahyp x None] ]
-
-    If the type [A] is referring to variables not in the list of
-    hypotheses, it raise [TypeMissesDependency]. If the list contains
-    something that is not a variable, it raises [NotAVar]. If it contains
-    duplicated occurrences of a variable, it raises a [DuplicatedVariable].
-*)
-Definition gen_evar@{a H}: forall(A: Type@{a}), moption@{a} (mlist@{a} Hyp@{H}) -> t A.
+(** The following option allows tracing the execution of a program. *)
+Definition get_trace: t bool.
+  make. Qed.
+Definition set_trace: bool -> t unit.
   make. Qed.
 
-(** [is_evar e] returns if [e] is an uninstantiated meta-variable,
-    perhaps applied to a list of arguments. *)
-Definition is_evar: forall{A: Type}, A -> t bool.
-  make. Qed.
-
+(** ** Misc *)
 (** [hash e n] returns a number smaller than [n] representing
-    a hash of term [e] *)
+    a hash of term [e]. *)
 Definition hash: forall{A: Type}, A -> N -> t N.
   make. Qed.
 
 (** [solve_typeclasses] calls type classes resolution. *)
 Definition solve_typeclasses : t@{Set} unit.
+  make. Qed.
+
+(** [solve_typeclass A] calls type classes resolution for [A] and
+    returns the result or fail. *)
+Definition solve_typeclass : forall (A:Type), t (moption A).
   make. Qed.
 
 (** [print s] prints string [s] to stdout. *)
@@ -186,9 +285,6 @@ Definition print : string -> t@{Set} unit.
 Definition pretty_print : forall{A: Type}, A -> t@{Set} string.
   make. Qed.
 
-(** [hyps] returns the list of hypotheses. *)
-Definition hyps: t (mlist Hyp).
-  make. Qed.
 
 (** [destcase e] returns a shallow reification of the pattern matching
     [e]. It raises [NotAMachExp] if [e] is not of the form
@@ -198,12 +294,7 @@ Definition destcase: forall{A: Type} (a: A), t (Case).
 
 (** Given an inductive type A, applied to all its parameters (but not
     necessarily indices), [constrs] returns a [Ind_dyn] value representing the
-    inductive type:
-    - [ind_dyn_ind]: The unapplied inductive type itself as a [dyn]
-    - [ind_dyn_nparams]: The number of parameters
-    - [ind_dyn_nindices]: The number of indices
-    - [ind_dyn_constrs]: the inductie type's constructors as [dyn]s
-. *)
+    inductive type. *)
 Definition constrs: forall{A: Type} (a: A), t Ind_dyn.
   make. Qed.
 
@@ -211,28 +302,10 @@ Definition constrs: forall{A: Type} (a: A), t Ind_dyn.
 Definition makecase: forall(C: Case), t dyn.
   make. Qed.
 
-(** [unify r x y ts tf] uses reduction strategy [r] to equate [x] and [y].
-    If unification succeeds, it will run [ts].
-    Otherwise, if unification fails, [tf] is executed instead.
-    It uses convertibility of universes, meaning that it fails if [x]
-    is [Prop] and [y] is [Type]. If they are both types, it will
-    try to equate its leveles. *)
-
-Definition unify_cnt {A: Type} {B: A -> Type} (U:Unification) (x y : A) : t (B y) -> t (B x) -> t (B x).
-  make. Qed.
-
-(** [munify_univ A B r] uses reduction strategy [r] to equate universes
-    [A] and [B].  It uses cumulativity of universes, e.g., it succeeds if
-    [x] is [Prop] and [y] is [Type]. *)
-Definition unify_univ (A: Type) (B: Type) : Unification -> t (moption (A->B)).
-  make. Qed.
-
-(** [get_reference s] returns the constant that is reference by [s]. *)
+(** [get_reference s] returns the constant that is referenced by the
+    _qualified name_ [s], e.g., "nat" or "Nat.succ". Raises
+    [RefNotFound s] if it doesn't exists.*)
 Definition get_reference: string -> t dyn.
-  make. Qed.
-
-(** [get_var s] returns the var named after [s]. *)
-Definition get_var: string -> t dyn.
   make. Qed.
 
 (** [call_ltac s args] calls an Ltac tactic named [s] with the list of
@@ -243,7 +316,7 @@ Definition get_var: string -> t dyn.
     - The arguments are terms (wrapped in a [dyn]), but many tactics require
       other kind of arguments, which we do not support at the moment.
     For some working examples of interfacing with Ltac you are invited to see
-    the file [tactics/ImportedTactics.v]. *)
+    the file #<a href="Mtac2.tactics.ImportedTactics.html">tactics.ImportedTactics</a>#. *)
 Definition call_ltac : forall(sort: Sort) {A: sort}, string->mlist dyn -> t (mprod A (mlist (goal gs_any))).
   make. Qed.
 
@@ -252,18 +325,16 @@ Definition call_ltac : forall(sort: Sort) {A: sort}, string->mlist dyn -> t (mpr
 Definition list_ltac: t unit.
   make. Qed.
 
-(** [read_line] returns the string from stdin. *)
+(** DEPRECATED: It will be removed in a coming version.
+    [read_line] returns the string from stdin. *)
 Definition read_line: t@{Set} string.
   make. Qed.
 
-(** [decompose x] decomposes value [x] into a head and a spine of
+(** DEPECRATED: Use [decompose_app'] instead.
+    [decompose x] decomposes value [x] into a head and a spine of
     arguments. For instance, [decompose (3 + 3)] returns
     [(Dyn add, [Dyn 3; Dyn 3])] *)
 Definition decompose : forall {A: Type}, A -> t (mprod dyn (mlist dyn)).
-  make. Qed.
-
-(** [solve_typeclass A] calls type classes resolution for [A] and returns the result or fail. *)
-Definition solve_typeclass : forall (A:Type), t (moption A).
   make. Qed.
 
 (** [declare dok name opaque t] defines [name] as definition kind
@@ -280,18 +351,9 @@ Definition declare_implicits: forall {A: Type} (a : A),
     mlist implicit_arguments -> t unit.
   make. Qed.
 
-(** [os_cmd cmd] executes the command and returns its error number. *)
+(** DEPRECATED This will be deleted in a coming version, once we find how to get rid of it.
+    [os_cmd cmd] executes the command and returns its error number. *)
 Definition os_cmd: string -> t Z.
-  make. Qed.
-
-Definition get_debug_exceptions: t bool.
-  make. Qed.
-Definition set_debug_exceptions: bool -> t unit.
-  make. Qed.
-
-Definition get_trace: t bool.
-  make. Qed.
-Definition set_trace: bool -> t unit.
   make. Qed.
 
 (** [is_head uni a (h u .. w) (fun x .. z => t)] executes
@@ -329,8 +391,9 @@ Definition decompose_forallP :
     t (B P).
   make. Qed.
 
-(** [decompose_app'' m (fun A B f x => t)] executes [A' .. x'/A .. x] iff m is
-    [f x] with [f : forall a : A, B a] and [x : A]. *)
+(** [decompose_app'' m (fun A B f x => t)] executes
+    [A',B',f',x'/A,B,f,x]t iff m is [f x] with [f : forall a : A, B a] and
+    [x : A], and there is an injection [S] from [B x] to [T]. *)
 Definition decompose_app'' :
   forall {S : forall T, T -> Type} {T : Type} (m : T),
     (forall A (B : A -> Type) (f : forall a, B a) (a : A), t (S _ (f a))) ->
@@ -354,12 +417,6 @@ Definition print_timer : forall {A} (a : A), t unit.
 
 (** [kind_of_term t] returns the term kind of t *)
 Definition kind_of_term: forall{A: Type}, A -> t tm_kind.
-  make. Qed.
-
-(** [@replace A B _ x eq t] excecutes [t] in the context resulting from replacing
-    the type [A] of hypothesis [x] with [B], using the [eq] witness of their
-    equality. *)
-Definition replace {A B C} (x:A) : A =m= B -> t C -> t C.
   make. Qed.
 
 Definition declare_mind
@@ -405,12 +462,15 @@ Definition instantiate_evar {A : Type} {P : A -> Type} (e x : A) (succ : t (P x)
 
 Arguments t _%type.
 
+(** * Useful definitions *)
+
 Definition fmap {A:Type} {B:Type} (f : A -> B) (x : t A) : t B :=
   bind x (fun a => ret (f a)).
 Definition fapp {A:Type} {B:Type} (f : t (A -> B)) (x : t A) : t B :=
   bind f (fun g => fmap g x).
 
-Definition Cevar (A : Type) (ctx : mlist Hyp) : t A := gen_evar A (mSome ctx).
+Definition Cevar (A : Type) (ctx : mlist Hyp) : t A :=
+  gen_evar A (mSome ctx).
 Definition evar@{a H} (A : Type@{a}) : t A := gen_evar@{a H} A mNone.
 
 Set Universe Minimization ToSet.
@@ -421,13 +481,15 @@ Definition sorted_evar (s: Sort) : forall T : s, t T :=
   | Typeₛ => fun T:Type => M.evar T
   end.
 
-Set Printing Universes.
+(** [unify x y U] unifies [x] with [y] and returns an option with an
+    equality proof [x =m= y] or [mNone]. *)
 Definition unify@{a} {A : Type@{a}} (x y : A) (U : Unification) : t@{a} (moption@{a} (meq@{a} x y)) :=
   unify_cnt@{a a} (A:=A) (B:=fun x => moption@{a} (meq x y)) U x y
             (ret@{a} (mSome@{a} (@meq_refl _ y)))
             (ret@{a} mNone@{a}).
 
-
+(** [raise e] raises exception [e] but first printing it if the option
+    [debug_exceptions] is set. *)
 Definition raise {A:Type} (e: Exception): t A :=
   bind get_debug_exceptions (fun b=>
   if b then
@@ -437,15 +499,20 @@ Definition raise {A:Type} (e: Exception): t A :=
   else
     raise' e).
 
+(** Raises a failure with a string. *)
 Definition failwith {A} (s : string) : t A := raise (Failure s).
 
 (* TODO: figure out why this is incompatible with [Minimization ToSet]. (It
 breaks tests/declare.v.) *)
 Unset Universe Minimization ToSet.
+
+(** [print_term x] prints the pretty printed version of [x] to the
+    output. *)
 Definition print_term {A} (x : A) : t unit :=
   bind (pretty_print x) (fun s=> print s).
 Set Universe Minimization ToSet.
 
+(** [dbg_term s x] prints [x] pre-pending it with string [s]. *)
 Definition dbg_term {A} (s: string) (x : A) : t unit :=
   bind (pretty_print x) (fun t=> print (s++t)).
 
