@@ -462,12 +462,71 @@ Definition instantiate_evar {A : Type} {P : A -> Type} (e x : A) (succ : t (P x)
 
 Arguments t _%type.
 
-(** * Useful definitions *)
+(** * Notations for various forms of binding *)
 
+(** Mtac2 natively supports the following binding notations:
+
+  - [x <- t1; t2] is just the same as [bind t1 (fun x=>t2)].
+  - ['x <- t1; t2] allows to use a pattern for x, as in
+    ['ex_intro _ y p <- t1; t2].
+  - [`x y .. z <- t1; t2] is the same as
+    [x <- t1; y <- t1; .. ; z <- t1; t2]. It is useful in particular
+    for creating several evars, as in [x y z <- evar _; ret (x + y + z)].
+  - [f =<< t] is the traditional [bind t f].
+  - [t >>= f] is the traditional [bind t f].
+
+  - [f <$> t] is useful for calling a normal function [f : A -> B]
+    with a monadic argument [t].
+  - [f <*> t] is useful for calling a monadic function [f : M (A -> B)]
+    with a monadic argument [t].
+
+  - [mif t then t1 else t2] is notation for [b <- t; if b then t1 else t2].
+*)
+
+(* begin details: Binding functions. *)
 Definition fmap {A:Type} {B:Type} (f : A -> B) (x : t A) : t B :=
   bind x (fun a => ret (f a)).
 Definition fapp {A:Type} {B:Type} (f : t (A -> B)) (x : t A) : t B :=
   bind f (fun g => fmap g x).
+
+Declare Scope M_scope.
+(* end details *)
+
+Module monad_notations.
+(* begin details: Scopes. *)
+  Bind Scope M_scope with t.
+  Delimit Scope M_scope with MC.
+  Open Scope M_scope.
+(* end details *)
+
+  Notation "r '<-' t1 ';' t2" := (bind t1 (fun r=> t2))
+    (at level 20, t1 at level 100, t2 at level 200,
+     right associativity, format "'[' r  '<-'  '[' t1 ;  ']' ']' '/' t2 ") : M_scope.
+  Notation "' r '<-' t1 ';' t2" := (bind t1 (fun r=> t2))
+    (at level 20, r pattern, t1 at level 100, t2 at level 200,
+     right associativity, format "'[' ''' r  '<-'  '[' t1 ;  ']' ']' '/' t2 ") : M_scope.
+  Notation "` r1 .. rn '<-' t1 ';' t2" := (bind t1 (fun r1 => .. (bind t1 (fun rn => t2)) ..))
+    (at level 20, r1 binder, rn binder, t1 at level 100, t2 at level 200,
+     right associativity, format "'[' '`' r1  ..  rn  '<-'  '[' t1 ;  ']' ']' '/' t2 ") : M_scope.
+  Notation "t1 ';;' t2" := (bind t1 (fun _ => t2))
+    (at level 100, t2 at level 200,
+     format "'[' '[' t1 ;;  ']' ']' '/' t2 ") : M_scope.
+
+  Notation "f =<< t" := (bind t f) (at level 70, only parsing) : M_scope.
+  Notation "t >>= f" := (bind t f) (at level 70) : M_scope.
+
+  Infix "<$>" := fmap (at level 61, left associativity) : M_scope.
+  Infix "<*>" := fapp (at level 61, left associativity) : M_scope.
+
+  Notation "'mif' b 'then' t 'else' u" :=
+    (cond <- b; if cond then t else u) (at level 200) : M_scope.
+End monad_notations.
+
+Import monad_notations.
+
+
+(** * Useful definitions *)
+
 
 Definition Cevar (A : Type) (ctx : mlist Hyp) : t A :=
   gen_evar A (mSome ctx).
@@ -525,40 +584,6 @@ Definition decompose_app'
   is_head uni a C success (raise WrongTerm).
 
 
-Declare Scope M_scope.
-
-Module monad_notations.
-  Bind Scope M_scope with t.
-  Delimit Scope M_scope with MC.
-  Open Scope M_scope.
-
-  Notation "r '<-' t1 ';' t2" := (bind t1 (fun r=> t2))
-    (at level 20, t1 at level 100, t2 at level 200,
-     right associativity, format "'[' r  '<-'  '[' t1 ;  ']' ']' '/' t2 ") : M_scope.
-  Notation "' r '<-' t1 ';' t2" := (bind t1 (fun r=> t2))
-    (at level 20, r pattern, t1 at level 100, t2 at level 200,
-     right associativity, format "'[' ''' r  '<-'  '[' t1 ;  ']' ']' '/' t2 ") : M_scope.
-  (* Notation "' r1 .. rn '<-' t1 ';' t2" := (bind t1 (fun r1 => .. (fun rn => t2) ..)) *)
-  (*   (at level 20, r1 binder, rn binder, t1 at level 100, t2 at level 200, *)
-  (*    right associativity, format "'[' ''' r1 .. rn  '<-'  '[' t1 ;  ']' ']' '/' t2 ") : M_scope. *)
-  Notation "` r1 .. rn '<-' t1 ';' t2" := (bind t1 (fun r1 => .. (bind t1 (fun rn => t2)) ..))
-    (at level 20, r1 binder, rn binder, t1 at level 100, t2 at level 200,
-     right associativity, format "'[' '`' r1  ..  rn  '<-'  '[' t1 ;  ']' ']' '/' t2 ") : M_scope.
-  Notation "t1 ';;' t2" := (bind t1 (fun _ => t2))
-    (at level 100, t2 at level 200,
-     format "'[' '[' t1 ;;  ']' ']' '/' t2 ") : M_scope.
-
-  Notation "f =<< t" := (bind t f) (at level 70, only parsing) : M_scope.
-  Notation "t >>= f" := (bind t f) (at level 70) : M_scope.
-
-  Infix "<$>" := fmap (at level 61, left associativity) : M_scope.
-  Infix "<*>" := fapp (at level 61, left associativity) : M_scope.
-
-  Notation "'mif' b 'then' t 'else' u" :=
-    (cond <- b; if cond then t else u) (at level 200) : M_scope.
-End monad_notations.
-
-Import monad_notations.
 
 Local Notation Mpattern A P y := (pattern A (fun y => t (P y)) y).
 Local Notation Mbranch A P y := (branch A (fun y => t (P y)) y).
