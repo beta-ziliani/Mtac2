@@ -1,3 +1,39 @@
+(** * Generic pattern-matching *)
+
+(** This file contains the infrastructure to construct pattern matches
+    of various forms. The constructs `mmatch` and `match_goal` are
+    different instances of what is shown in this file. *)
+
+(** There are two types of patterns, distinguished by its type:
+
+  - [pattern] describes a pattern with _holes_ that are instantiated
+    with meta-variables (_evars_). It includes the following
+    notations, that we make concrete with examples:
+
+    - In [ [? (A:Type) (f:A->Prop)] forall x:A, f x => t ] what comes
+      after the [?] are the holes of the pattern. This pattern matches
+      something like [forall x:nat, x >= 0]. Since Mtac2 uses higher-order
+      unification to perform the matching, [f] will be instantiated
+      with [fun x:nat =>x >= 0].
+
+    - In [ [¿ s] [? (A:Type) (f:A->Prop)] forall x:A, f x => t  ] the pattern [p] is tested first with [s] being
+      [Propₛ], and if that fails, with [Typeₛ].
+
+    Patterns can be annotated with a [Unification] identifier, in
+    order to pick the algorithm to perform unification. This
+    identifier is part of the double-arrow:
+
+    - [=n>] neither the scrutinee nor the pattern are reduced
+      ([UniMatchNoRed]).
+
+    - [=u>] the scrutinee and the pattern are reduced ([UniCoq]).
+
+    - [=c>] the scrutinee and the pattern are reduced ([UniEvarconv]).
+
+    - [=>] the scrutinee is reduced but the pattern isn't ([UniMatch]).
+*)
+
+(* begin hide *)
 From Mtac2 Require Import Logic List intf.Unification Sorts MTele Exceptions.
 Import Sorts.S.
 Import ListNotations.
@@ -5,24 +41,48 @@ Import ListNotations.
 Set Universe Polymorphism.
 Unset Universe Minimization ToSet.
 Set Polymorphic Inductive Cumulativity.
+(* end hide *)
 
-(** Pattern matching without pain *)
-(* The M will be instantiated with the M monad or the gtactic monad. In principle,
-we could make it part of the B, but then higher order unification will fail. *)
+(** A [pattern A B y] describes a pattern matching element [y] and
+    returning something of the form [B y]. It consists of the
+    following constructors:
+
+  - [pany t] is when matching always. [t] is then the code to be run.
+
+  - [pbase x f U] matches [x] with [y] according to the unification
+    strategy [U].  If it succeeds, then it executes [f meq_refl].
+
+  - [ptele f] allows introducing a variable in the pattern, which is
+    then replaced with a meta-variable, like [x] in [ [? x] S x => ... ].
+
+  - [psort f] introduces a sort.  *)
+
+(* TODO I don't understand this comment:
+   The M will be instantiated with the M monad or the gtactic monad. In principle,
+   we could make it part of the B, but then higher order unification will fail. *)
 Inductive pattern@{a} (A : Type@{a}) (B : A -> Prop) (y : A) : Prop :=
   | pany : B y -> pattern A B y
   | pbase : forall x : A, (y =m= x -> B x) -> Unification -> pattern A B y
   | ptele : forall {C:Type@{a}}, (forall x : C, pattern A B y) -> pattern A B y
   | psort : (Sort -> pattern A B y) -> pattern A B y.
 
-
 Arguments pany {A B y} _.
 Arguments pbase {A B y} _ _ _.
 Arguments ptele {A B y C} _.
 Arguments psort {A B y} _.
 
-(* Set Printing Universes. *)
-(* Set Printing Implicit. *)
+(** A [branch A B y] is a [pattern A B y] with extra layers for
+    matching the shape of an object _without creating evars_.
+
+ - [branch_pattern] is the base case, and it just contains a
+   [pattern].
+
+ - [branch_app_static] TODO
+
+ - [branch_foallP f] checks the term is a [forall (x:X), Y x : Prop] and calls
+   [f X Y] upon success.
+
+ - [branch_foallT f] is equivalent to [branch_forallP] but for [Type]. *)
 Inductive branch@{a elem_a x+} : forall {A : Type@{a}} {B : A -> Prop} {y : A}, Prop :=
 | branch_pattern {A : Type@{a}} {B : A -> Prop} {y : A}: pattern A B y -> @branch A B y
 | branch_app_static {A : Type@{a}} {B : A -> Prop} {y : A}:
@@ -36,7 +96,6 @@ Inductive branch@{a elem_a x+} : forall {A : Type@{a}} {B : A -> Prop} {y : A}, 
     (forall (X : Type@{elem_a}) (Y : X -> Type@{elem_a}), B (forall x : X, Y x)) ->
     @branch Type@{elem_a} B y.
 Arguments branch _ _ _ : clear implicits.
-
 
 (* | branch_app_dynamic {A} {B : forall A, A -> Type} {y}: *)
 (*     (forall X (Y : X -> Type) (f : forall x, Y x) (x : X), M (B _ (f x))) -> *)
