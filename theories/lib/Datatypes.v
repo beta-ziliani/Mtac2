@@ -1,3 +1,5 @@
+(** * Polymorphic version of the same file in Coq *)
+
 (************************************************************************)
 (*  v      *   The Coq Proof Assistant  /  The Coq Development Team     *)
 (* <O___,, *   INRIA - CNRS - LIX - LRI - PPS - Copyright 1999-2017     *)
@@ -18,10 +20,6 @@ Require Import Notations.
 
 (* (********************************************************************) *)
 (* (** * Container datatypes *) *)
-
-(* (* Set Universe Polymorphism.
-Set Polymorphic Inductive Cumulativity. *) *)
-
 
 Inductive munit : Set :=
     mtt : munit.

@@ -1,5 +1,15 @@
 (** * Generic pattern-matching *)
 
+(* begin hide *)
+From Mtac2 Require Import Logic List intf.Unification Sorts MTele Exceptions.
+Import Sorts.S.
+Import ListNotations.
+
+Set Universe Polymorphism.
+Unset Universe Minimization ToSet.
+Set Polymorphic Inductive Cumulativity.
+(* end hide *)
+
 (** This file contains the infrastructure to construct pattern matches
     of various forms. The constructs `mmatch` and `match_goal` are
     different instances of what is shown in this file. *)
@@ -16,8 +26,11 @@
       unification to perform the matching, [f] will be instantiated
       with [fun x:nat =>x >= 0].
 
-    - In [ [¿ s] [? (A:Type) (f:A->Prop)] forall x:A, f x => t  ] the pattern [p] is tested first with [s] being
-      [Propₛ], and if that fails, with [Typeₛ].
+    - In [ [¿ s] [? (A:Type) (f:A->s)] forall x:A, f x => t ] the
+      pattern [p] is tested first with [s] being [Propₛ], and if that
+      fails, with [Typeₛ]. This pattern is useful for generalizing
+      branches with [Prop] or [Type] sorts. [ [¿ s] ] can also be written
+      [ [S? s] ].
 
     Patterns can be annotated with a [Unification] identifier, in
     order to pick the algorithm to perform unification. This
@@ -31,34 +44,41 @@
     - [=c>] the scrutinee and the pattern are reduced ([UniEvarconv]).
 
     - [=>] the scrutinee is reduced but the pattern isn't ([UniMatch]).
+
+    Finally, sometimes it is useful to have a hypothesis telling that
+    the scrutinee is definitionally equal to the pattern. This is
+    written adding a [ [H] ] to the right side of the arrow. For
+    instance, if the scrutinee is [scr], the pattern [ [? (A:Type)
+    (f:A->Prop)] forall x:A, f x => [eqFA] t ] will have variable
+    [eqFA] being a proof that [scr =m= forall x:A, f x]. Note that it uses
+    the polymorphic equality type [meq].
+
+  - [branch A B y] is a [pattern A B y] with extra layers for matching
+    the shape of an object _without creating evars_. Evars are costly
+    in terms of performance, and in many cases they can be
+    avoided. These patterns help matching without paying that cost.
+
 *)
 
-(* begin hide *)
-From Mtac2 Require Import Logic List intf.Unification Sorts MTele Exceptions.
-Import Sorts.S.
-Import ListNotations.
-
-Set Universe Polymorphism.
-Unset Universe Minimization ToSet.
-Set Polymorphic Inductive Cumulativity.
-(* end hide *)
 
 (** A [pattern A B y] describes a pattern matching element [y] and
     returning something of the form [B y]. It consists of the
     following constructors:
 
-  - [pany t] is when matching always. [t] is then the code to be run.
+  - [pany t] matches always, and is note as [ _ => t ]. [t] is then the
+    code to be run.
 
   - [pbase x f U] matches [x] with [y] according to the unification
     strategy [U].  If it succeeds, then it executes [f meq_refl].
 
   - [ptele f] allows introducing a variable in the pattern, which is
-    then replaced with a meta-variable, like [x] in [ [? x] S x => ... ].
+    then replaced with a meta-variable, like [x] in [ [? x] S x =>
+    ... ].
 
   - [psort f] introduces a sort.  *)
 
 (* TODO I don't understand this comment:
-   The M will be instantiated with the M monad or the gtactic monad. In principle,
+   B will be instantiated with the M monad or the gtactic monad. In principle,
    we could make it part of the B, but then higher order unification will fail. *)
 Inductive pattern@{a} (A : Type@{a}) (B : A -> Prop) (y : A) : Prop :=
   | pany : B y -> pattern A B y
@@ -71,9 +91,7 @@ Arguments pbase {A B y} _ _ _.
 Arguments ptele {A B y C} _.
 Arguments psort {A B y} _.
 
-(** A [branch A B y] is a [pattern A B y] with extra layers for
-    matching the shape of an object _without creating evars_.
-
+(**
  - [branch_pattern] is the base case, and it just contains a
    [pattern].
 
