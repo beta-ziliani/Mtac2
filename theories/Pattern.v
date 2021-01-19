@@ -15,6 +15,7 @@ Set Polymorphic Inductive Cumulativity.
     different instances of what is shown in this file. *)
 
 (** ** Introduction *)
+
 (** There are two types of patterns, distinguished by its type:
 
   - [pattern] describes a pattern with _holes_ that are instantiated
