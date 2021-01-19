@@ -14,6 +14,7 @@ Set Polymorphic Inductive Cumulativity.
     of various forms. The constructs `mmatch` and `match_goal` are
     different instances of what is shown in this file. *)
 
+(** ** Introduction *)
 (** There are two types of patterns, distinguished by its type:
 
   - [pattern] describes a pattern with _holes_ that are instantiated
@@ -22,15 +23,15 @@ Set Polymorphic Inductive Cumulativity.
 
     - In [ [? (A:Type) (f:A->Prop)] forall x:A, f x => t ] what comes
       after the [?] are the holes of the pattern. This pattern matches
-      something like [forall x:nat, x >= 0]. Since Mtac2 uses higher-order
+      a term like [forall x:nat, x >= 0]. Since Mtac2 uses higher-order
       unification to perform the matching, [f] will be instantiated
       with [fun x:nat =>x >= 0].
 
     - In [ [¿ s] [? (A:Type) (f:A->s)] forall x:A, f x => t ] the
-      pattern [p] is tested first with [s] being [Propₛ], and if that
-      fails, with [Typeₛ]. This pattern is useful for generalizing
-      branches with [Prop] or [Type] sorts. [ [¿ s] ] can also be written
-      [ [S? s] ].
+      pattern [p] is tested first with the [s] being [Propₛ], and if
+      that fails, with [Typeₛ]. This pattern is useful for
+      generalizing branches with [Prop] or [Type] sorts. [ [¿ s] ] can
+      also be written [ [S? s] ].
 
     Patterns can be annotated with a [Unification] identifier, in
     order to pick the algorithm to perform unification. This
@@ -45,7 +46,7 @@ Set Polymorphic Inductive Cumulativity.
 
     - [=>] the scrutinee is reduced but the pattern isn't ([UniMatch]).
 
-    Finally, sometimes it is useful to have a hypothesis telling that
+    Finally, sometimes it is useful to have a hypothesis proving that
     the scrutinee is definitionally equal to the pattern. This is
     written adding a [ [H] ] to the right side of the arrow. For
     instance, if the scrutinee is [scr], the pattern [ [? (A:Type)
@@ -58,8 +59,13 @@ Set Polymorphic Inductive Cumulativity.
     in terms of performance, and in many cases they can be
     avoided. These patterns help matching without paying that cost.
 
+    - [ [# plus | x y =n> code] ] will match [plus n m], instantiating
+      [x] with [n] and [y] with [m].
+
+    - TODO: add the other patterns.
 *)
 
+(** ** Implementation *)
 
 (** A [pattern A B y] describes a pattern matching element [y] and
     returning something of the form [B y]. It consists of the
@@ -212,7 +218,7 @@ Notation "'with' p1 | .. | pn 'end'" :=
 
 Delimit Scope with_pattern_scope with with_pattern.
 
-(* Syntax for decomposition of applications with a known head symbol.
+(** Syntax for decomposition of applications with a known head symbol.
 
    The [=>] arrows are annotated with the reduction strategy used for the
    initial arguments that are part of the head symbol term [f]. The delimiter
@@ -265,7 +271,7 @@ Notation "'[#' ] f '|' '=c>' b" :=
   (branch_app_static (m := mBase) UniEvarconv f b) (at level 201) : branch_scope.
 
 
-(* Syntax for decomposition of [forall x : X, P x].
+(** Syntax for decomposition of [forall x : X, P x].
 
    We define two variants, one for [Prop] and for [Type].
    The initial tokens are [[!Prop]] and [[!Type]] and the remaining

@@ -584,10 +584,19 @@ Definition decompose_app'
   is_head uni a C success (raise WrongTerm).
 
 
+(** ** Pattern matching *)
 
+(** Pattern matching is explained in the [Pattern] module, which sets
+    the basic infrastructure that this file uses. *)
+
+(** We define locally patterns for the M monad. *)
 Local Notation Mpattern A P y := (pattern A (fun y => t (P y)) y).
 Local Notation Mbranch A P y := (branch A (fun y => t (P y)) y).
 
+(** [open_pattern E p] takes a pattern and matches it agains the
+    (implict) term [y] (the scrutinee). The exception [E] serves to
+    indicate that the pattern did not match, and we use it to
+    backtrack the evars generated. *)
 Definition open_pattern@{a p+} {A : Type@{a}} {P : A -> Type@{p}} {y} (E : Exception) :=
   Eval lazy beta iota match zeta delta [meq_sym] in
   fix open_pattern (p : Mpattern A P y) : t (P y) :=
@@ -598,11 +607,10 @@ Definition open_pattern@{a p+} {A : Type@{a}} {P : A -> Type@{p}} {y} (E : Excep
     match oeq return t (P y) with
     | mSome eq =>
       (* eq has type x =m= t, but for the pattern we need t = x. *)
-    (*      we still want to provide eq_refl though, so we reduce it *)
+      (* we still want to provide eq_refl though, so we reduce it *)
       let h := reduce@{Set} (RedWhd [rl:RedBeta;RedDelta;RedMatch]) (meq_sym eq) in
       let 'meq_refl := eq in
-      (* For some reason, we need to return the beta-reduction of the pattern, or some tactic fails *)
-      let b := (* reduce (RedWhd [rl:RedBeta]) *) (f h) in b
+      f h
     | mNone => raise E
     end)
   | ptele f => e <- evar@{_ a} _; open_pattern (f e)
@@ -610,18 +618,13 @@ Definition open_pattern@{a p+} {A : Type@{a}} {P : A -> Type@{p}} {y} (E : Excep
     mtry'
       (open_pattern (f Propₛ))
       (fun e =>
-         M.unify_cnt@{Set _} UniMatchNoRed e E (open_pattern (f Typeₛ)) (raise e)
-         (* oeq <- M.unify e E UniMatchNoRed; *)
-         (* match oeq with *)
-         (* | mSome _ => open_pattern E (f Typeₛ) *)
-         (* | mNone => raise e *)
-         (* end *)
-      )
+         M.unify_cnt@{Set _} UniMatchNoRed e E (open_pattern (f Typeₛ)) (raise e))
   end.
 
-(* We need to be extra careful here to use the provided [y] instead of that
-   provided by the dependent pattern matching (which may be more reduced or
-   otherwise mangled). *)
+(** This is the equivalent to [open_pattern], but for [branch]. We
+   need to be extra careful here to use the provided [y] instead of
+   that provided by the dependent pattern matching (which may be more
+   reduced or otherwise mangled). *)
 Definition open_branch {A P y} (E : Exception) (b : branch A (fun a => t (P a)) y) : t (P y) :=
   Eval lazy beta zeta iota delta [internal_meq_rew open_pattern] in
   match b in branch A' P' y' return
@@ -643,10 +646,13 @@ Definition open_branch {A P y} (E : Exception) (b : branch A (fun a => t (P a)) 
     fun z P_old eq Peq =>
       let op := decompose_forallP z in
       ltac:(rewrite eq in op; rewrite Peq in cont; refine (op cont (raise E)))
-  (* | _ => fun _ _ => M.failwith "not implemented" *)
   end y P meq_refl meq_refl.
 
-(* The first universe of the [branch] could be shared with [A] but somehow that makes our iris case study slower in a reproducible way.  *)
+(** [mmatch''] tries a list of branches to see which one matches.
+
+    The first universe of the [branch] could be shared with [A] but
+    somehow that makes our iris case study slower in a reproducible
+    way.  *)
 Definition mmatch''@{a p+} {A:Type@{a}} {P: A -> Type@{p}} (E : Exception) (y : A) (failure : t (P y)) :=
   Eval lazy beta zeta iota delta [open_branch] in
   fix mmatch'' (ps : mlist@{Set} (Mbranch A P y)) : t (P y) :=
@@ -680,7 +686,7 @@ Module Matcher.
 End Matcher.
 Export Matcher.
 
-
+(** * A collection of useful notations *)
 Module notations_pre.
   Export monad_notations.
 
